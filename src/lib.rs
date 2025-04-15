@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 
+use instance::InstanceState;
 use log::trace;
 
+use texture::Texture;
 use wgpu::TextureFormat;
 use wgpu::{Adapter, Device, Instance, PipelineLayout, Queue, RenderPipeline, ShaderModule};
 
@@ -38,7 +40,7 @@ struct App {
     surface_state: Option<SurfaceState>,
     render_state: Option<RenderState>,
     vertex_state: Option<data::VertexState>,
-    instance_state:
+    instance_state: Option<InstanceState>,
 }
 
 impl App {
@@ -123,7 +125,13 @@ impl App {
                 targets: &[Some(target_format.into())],
             }),
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -188,7 +196,7 @@ impl App {
                 height: size.height,
                 //present_mode: wgpu::PresentMode::Mailbox,
                 present_mode: wgpu::PresentMode::Fifo,
-                alpha_mode: wgpu::CompositeAlphaMode::Inherit,
+                alpha_mode: wgpu::CompositeAlphaMode::Opaque,
                 view_formats: vec![swapchain_format],
             };
 
@@ -267,6 +275,10 @@ fn run(mut event_loop: EventLoop<()>) {
                             .create_view(&wgpu::TextureViewDescriptor::default());
 
                         let vertex_state = data::VertexState::new(&rs.device);
+                        let instance_state = InstanceState::new(&rs.device);
+
+                        let size = surface_state.window.inner_size();
+                        let depth_tex = Texture::create_depth_tex(&rs.device, size);
 
                         let mut encoder =
                             rs.device
@@ -285,7 +297,16 @@ fn run(mut event_loop: EventLoop<()>) {
                                             store: true,
                                         },
                                     })],
-                                    depth_stencil_attachment: None,
+                                    depth_stencil_attachment: Some(
+                                        wgpu::RenderPassDepthStencilAttachment {
+                                            view: &depth_tex.view,
+                                            depth_ops: Some(wgpu::Operations {
+                                                load: wgpu::LoadOp::Clear(1.0),
+                                                store: true,
+                                            }),
+                                            stencil_ops: None,
+                                        },
+                                    ),
                                 });
 
                             rpass.set_pipeline(&rs.render_pipeline);
@@ -294,6 +315,7 @@ fn run(mut event_loop: EventLoop<()>) {
                             rpass.set_bind_group(1, &rs.camera_state.bind_group, &[]);
 
                             rpass.set_vertex_buffer(0, vertex_state.vertex_buffer.slice(..));
+                            rpass.set_vertex_buffer(1, instance_state.instance_buffer.slice(..));
                             rpass.set_index_buffer(
                                 vertex_state.index_buffer.slice(..),
                                 wgpu::IndexFormat::Uint16,
