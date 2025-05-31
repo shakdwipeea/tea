@@ -179,7 +179,7 @@ impl App {
                 let swapchain_format = surface_caps.formats[0];
                 let rs = Self::init_render_state(adapter, swapchain_format).await;
                 self.render_state = Some(rs);
-                
+
                 // Initialize vertex and instance state once
                 if let Some(ref render_state) = self.render_state {
                     self.vertex_state = Some(data::VertexState::new(&render_state.device));
@@ -247,7 +247,7 @@ fn run(mut event_loop: EventLoop<()>) {
     // `std::process::exit` when finished which will short-circuit any
     // Java lifecycle handling
     event_loop.run_return(move |event, event_loop, control_flow| {
-        log::info!("Received Winit event: {event:?}");
+        // log::info!("Received Winit event: {event:?}");
 
         *control_flow = ControlFlow::Wait;
         match event {
@@ -270,78 +270,102 @@ fn run(mut event_loop: EventLoop<()>) {
                 app.queue_redraw();
             }
             Event::RedrawRequested(_) => {
-                log::info!("Handling Redraw Request");
+                // log::info!("Handling Redraw Request");
 
-                if let (Some(ref surface_state), Some(ref mut rs), Some(ref vertex_state), Some(ref instance_state)) = 
-                    (&app.surface_state, &mut app.render_state, &app.vertex_state, &app.instance_state) {
-                        let frame = surface_state
-                            .surface
-                            .get_current_texture()
-                            .expect("Failed to acquire next swap chain texture");
-                        let view = frame
-                            .texture
-                            .create_view(&wgpu::TextureViewDescriptor::default());
-
-                        let size = surface_state.window.inner_size();
-                        let aspect_ratio = size.width as f32 / size.height as f32;
-                        
-                        // Update camera uniform buffer
-                        rs.camera_state.camera.update_aspect_ratio(aspect_ratio);
-                        rs.camera_state.update();
-                        rs.queue.write_buffer(
-                            &rs.camera_state.buffer,
-                            0,
-                            bytemuck::cast_slice(&[rs.camera_state.uniform]),
-                        );
-                        let depth_tex = Texture::create_depth_tex(&rs.device, size);
-
-                        let mut encoder =
-                            rs.device
-                                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                    label: None,
-                                });
-                        {
-                            let mut rpass =
-                                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                    label: None,
-                                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                        view: &view,
-                                        resolve_target: None,
-                                        ops: wgpu::Operations {
-                                            load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
-                                            store: true,
-                                        },
-                                    })],
-                                    depth_stencil_attachment: Some(
-                                        wgpu::RenderPassDepthStencilAttachment {
-                                            view: &depth_tex.view,
-                                            depth_ops: Some(wgpu::Operations {
-                                                load: wgpu::LoadOp::Clear(1.0),
-                                                store: true,
-                                            }),
-                                            stencil_ops: None,
-                                        },
-                                    ),
-                                });
-
-                            rpass.set_pipeline(&rs.render_pipeline);
-
-                            rpass.set_bind_group(0, &rs.texture_state.bind_group, &[]);
-                            rpass.set_bind_group(1, &rs.camera_state.bind_group, &[]);
-
-                            rpass.set_vertex_buffer(0, vertex_state.vertex_buffer.slice(..));
-                            rpass.set_vertex_buffer(1, instance_state.instance_buffer.slice(..));
-                            rpass.set_index_buffer(
-                                vertex_state.index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint16,
-                            );
-
-                            rpass.draw_indexed(0..vertex_state.num_indices, 0, 0..instance_state.num_instances());
+                if let (
+                    Some(ref surface_state),
+                    Some(ref mut rs),
+                    Some(ref vertex_state),
+                    Some(ref mut instance_state),
+                ) = (
+                    &app.surface_state,
+                    &mut app.render_state,
+                    &app.vertex_state,
+                    &mut app.instance_state,
+                ) {
+                    let frame = match surface_state.surface.get_current_texture() {
+                        Ok(frame) => frame,
+                        Err(wgpu::SurfaceError::Outdated) => {
+                            log::info!("Surface outdated during redraw, skipping frame");
+                            surface_state.window.request_redraw();
+                            return;
                         }
+                        Err(e) => {
+                            log::error!("Failed to acquire surface texture: {}", e);
+                            return;
+                        }
+                    };
+                    
+                    let view = frame
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
 
-                        rs.queue.submit(Some(encoder.finish()));
-                        frame.present();
-                        surface_state.window.request_redraw();
+                    // Use the actual surface texture size to ensure depth texture matches surface texture
+                    let surface_size = frame.texture.size();
+                    let size = winit::dpi::PhysicalSize::new(surface_size.width, surface_size.height);
+                    let aspect_ratio = size.width as f32 / size.height as f32;
+
+                    // Update instance rotations
+                    instance_state.update(&rs.queue);
+
+                    // Update camera uniform buffer
+                    rs.camera_state.camera.update_aspect_ratio(aspect_ratio);
+                    rs.camera_state.update();
+                    rs.queue.write_buffer(
+                        &rs.camera_state.buffer,
+                        0,
+                        bytemuck::cast_slice(&[rs.camera_state.uniform]),
+                    );
+                    let depth_tex = Texture::create_depth_tex(&rs.device, size);
+
+                    let mut encoder = rs
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                    {
+                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
+                                    store: true,
+                                },
+                            })],
+                            depth_stencil_attachment: Some(
+                                wgpu::RenderPassDepthStencilAttachment {
+                                    view: &depth_tex.view,
+                                    depth_ops: Some(wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(1.0),
+                                        store: true,
+                                    }),
+                                    stencil_ops: None,
+                                },
+                            ),
+                        });
+
+                        rpass.set_pipeline(&rs.render_pipeline);
+
+                        rpass.set_bind_group(0, &rs.texture_state.bind_group, &[]);
+                        rpass.set_bind_group(1, &rs.camera_state.bind_group, &[]);
+
+                        rpass.set_vertex_buffer(0, vertex_state.vertex_buffer.slice(..));
+                        rpass.set_vertex_buffer(1, instance_state.instance_buffer.slice(..));
+                        rpass.set_index_buffer(
+                            vertex_state.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+
+                        rpass.draw_indexed(
+                            0..vertex_state.num_indices,
+                            0,
+                            0..instance_state.num_instances(),
+                        );
+                    }
+
+                    rs.queue.submit(Some(encoder.finish()));
+                    frame.present();
+                    surface_state.window.request_redraw();
                 }
             }
             Event::WindowEvent {
@@ -364,7 +388,7 @@ fn _main(event_loop: EventLoop<()>) {
 #[cfg(not(target_os = "android"))]
 fn main() {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Info) // Default Log Level
+        .filter_level(log::LevelFilter::Debug) // Default Log Level
         .parse_default_env()
         .init();
 
