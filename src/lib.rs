@@ -179,6 +179,12 @@ impl App {
                 let swapchain_format = surface_caps.formats[0];
                 let rs = Self::init_render_state(adapter, swapchain_format).await;
                 self.render_state = Some(rs);
+                
+                // Initialize vertex and instance state once
+                if let Some(ref render_state) = self.render_state {
+                    self.vertex_state = Some(data::VertexState::new(&render_state.device));
+                    self.instance_state = Some(InstanceState::new(&render_state.device));
+                }
             }
         }
     }
@@ -251,6 +257,8 @@ fn run(mut event_loop: EventLoop<()>) {
             Event::Suspended => {
                 log::info!("Suspended, dropping render state...");
                 app.render_state = None;
+                app.vertex_state = None;
+                app.instance_state = None;
             }
             Event::WindowEvent {
                 event: WindowEvent::Resized(_size),
@@ -264,8 +272,8 @@ fn run(mut event_loop: EventLoop<()>) {
             Event::RedrawRequested(_) => {
                 log::info!("Handling Redraw Request");
 
-                if let Some(ref surface_state) = app.surface_state {
-                    if let Some(ref rs) = app.render_state {
+                if let (Some(ref surface_state), Some(ref mut rs), Some(ref vertex_state), Some(ref instance_state)) = 
+                    (&app.surface_state, &mut app.render_state, &app.vertex_state, &app.instance_state) {
                         let frame = surface_state
                             .surface
                             .get_current_texture()
@@ -274,10 +282,17 @@ fn run(mut event_loop: EventLoop<()>) {
                             .texture
                             .create_view(&wgpu::TextureViewDescriptor::default());
 
-                        let vertex_state = data::VertexState::new(&rs.device);
-                        let instance_state = InstanceState::new(&rs.device);
-
                         let size = surface_state.window.inner_size();
+                        let aspect_ratio = size.width as f32 / size.height as f32;
+                        
+                        // Update camera uniform buffer
+                        rs.camera_state.camera.update_aspect_ratio(aspect_ratio);
+                        rs.camera_state.update();
+                        rs.queue.write_buffer(
+                            &rs.camera_state.buffer,
+                            0,
+                            bytemuck::cast_slice(&[rs.camera_state.uniform]),
+                        );
                         let depth_tex = Texture::create_depth_tex(&rs.device, size);
 
                         let mut encoder =
@@ -321,13 +336,12 @@ fn run(mut event_loop: EventLoop<()>) {
                                 wgpu::IndexFormat::Uint16,
                             );
 
-                            rpass.draw_indexed(0..vertex_state.num_indices, 0, 0..1);
+                            rpass.draw_indexed(0..vertex_state.num_indices, 0, 0..instance_state.num_instances());
                         }
 
                         rs.queue.submit(Some(encoder.finish()));
                         frame.present();
                         surface_state.window.request_redraw();
-                    }
                 }
             }
             Event::WindowEvent {

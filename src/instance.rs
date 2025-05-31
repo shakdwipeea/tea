@@ -63,9 +63,9 @@ impl InstanceState {
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
                     let position = cgmath::Vector3 {
-                        x: x as f32,
+                        x: x as f32 * 2.0,
                         y: 0.0,
-                        z: z as f32,
+                        z: z as f32 * 2.0,
                     } - INSTANCE_DISPLACEMENT;
 
                     let rotation = if position.is_zero() {
@@ -94,11 +94,15 @@ impl InstanceState {
             instance_buffer,
         }
     }
+
+    pub fn num_instances(&self) -> u32 {
+        self.instances.len() as u32
+    }
 }
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
 const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
+    NUM_INSTANCES_PER_ROW as f32 * 2.0 * 0.5,
     0.0,
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
+    NUM_INSTANCES_PER_ROW as f32 * 2.0 * 0.5,
 );

@@ -28,7 +28,7 @@ impl Camera {
 
     pub fn new() -> Self {
         Self {
-            eye: cgmath::Point3::new(0.0, 1.0, 2.0),
+            eye: cgmath::Point3::new(0.0, 8.0, 15.0),
             target: cgmath::Point3::new(0.0, 0.0, 0.0),
             up: cgmath::Vector3::unit_y(),
             fov: 45.0,
@@ -37,11 +37,15 @@ impl Camera {
             zfar: 100.0,
         }
     }
+
+    pub fn update_aspect_ratio(&mut self, aspect: f32) {
+        self.aspect = aspect;
+    }
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct CameraUniform {
+pub struct CameraUniform {
     view_proj: [[f32; 4]; 4],
 }
 
@@ -58,9 +62,9 @@ impl CameraUniform {
 }
 
 pub struct CameraState {
-    camera: Camera,
-    uniform: CameraUniform,
-    buffer: wgpu::Buffer,
+    pub camera: Camera,
+    pub uniform: CameraUniform,
+    pub buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
     pub bind_group_layout: wgpu::BindGroupLayout,
 }

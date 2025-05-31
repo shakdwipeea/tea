@@ -20,31 +20,59 @@ impl VertexData {
     }
 }
 
-// Changed
+// Cube vertices
 const VERTICES: &[VertexData] = &[
+    // Front face
     VertexData {
-        position: [-0.0868241, 0.49240386, 0.0],
-        tex_coords: [0.4131759, 0.99240386],
-    }, // A
+        position: [-0.5, -0.5,  0.5],
+        tex_coords: [0.0, 0.0],
+    }, // 0: front bottom left
     VertexData {
-        position: [-0.49513406, 0.06958647, 0.0],
-        tex_coords: [0.0048659444, 0.56958647],
-    }, // B
+        position: [ 0.5, -0.5,  0.5],
+        tex_coords: [1.0, 0.0],
+    }, // 1: front bottom right
     VertexData {
-        position: [-0.21918549, -0.44939706, 0.0],
-        tex_coords: [0.28081453, 0.05060294],
-    }, // C
+        position: [ 0.5,  0.5,  0.5],
+        tex_coords: [1.0, 1.0],
+    }, // 2: front top right
     VertexData {
-        position: [0.35966998, -0.3473291, 0.0],
-        tex_coords: [0.85967, 0.1526709],
-    }, // D
+        position: [-0.5,  0.5,  0.5],
+        tex_coords: [0.0, 1.0],
+    }, // 3: front top left
+
+    // Back face
     VertexData {
-        position: [0.44147372, 0.2347359, 0.0],
-        tex_coords: [0.9414737, 0.7347359],
-    }, // E
+        position: [-0.5, -0.5, -0.5],
+        tex_coords: [1.0, 0.0],
+    }, // 4: back bottom left
+    VertexData {
+        position: [ 0.5, -0.5, -0.5],
+        tex_coords: [0.0, 0.0],
+    }, // 5: back bottom right
+    VertexData {
+        position: [ 0.5,  0.5, -0.5],
+        tex_coords: [0.0, 1.0],
+    }, // 6: back top right
+    VertexData {
+        position: [-0.5,  0.5, -0.5],
+        tex_coords: [1.0, 1.0],
+    }, // 7: back top left
 ];
 
-const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
+const INDICES: &[u16] = &[
+    // Front face
+    0, 1, 2,  2, 3, 0,
+    // Back face
+    4, 5, 6,  6, 7, 4,
+    // Left face
+    7, 3, 0,  0, 4, 7,
+    // Right face
+    1, 5, 6,  6, 2, 1,
+    // Bottom face
+    4, 0, 1,  1, 5, 4,
+    // Top face
+    3, 7, 6,  6, 2, 3,
+];
 
 pub struct VertexState {
     pub vertex_buffer: wgpu::Buffer,
