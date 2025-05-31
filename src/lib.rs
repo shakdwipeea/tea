@@ -29,6 +29,93 @@ struct RenderState {
     camera_state: camera::CameraState,
 }
 
+impl RenderState {
+    fn update_uniforms(&mut self, aspect_ratio: f32, instance_state: &mut InstanceState) {
+        // Update instance rotations first
+        instance_state.update(&self.queue);
+        
+        // Update camera uniform buffer
+        self.camera_state.camera.update_aspect_ratio(aspect_ratio);
+        self.camera_state.update();
+        self.queue.write_buffer(
+            &self.camera_state.buffer,
+            0,
+            bytemuck::cast_slice(&[self.camera_state.uniform]),
+        );
+    }
+    
+    fn setup_render_pass<'a>(
+        &'a self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        view: &'a wgpu::TextureView,
+        depth_view: &'a wgpu::TextureView,
+    ) -> wgpu::RenderPass<'a> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
+                    store: true,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: true,
+                }),
+                stencil_ops: None,
+            }),
+        })
+    }
+    
+    fn bind_resources<'a>(
+        &'a self,
+        rpass: &mut wgpu::RenderPass<'a>,
+        vertex_state: &'a data::VertexState,
+        instance_state: &'a InstanceState,
+    ) {
+        rpass.set_pipeline(&self.render_pipeline);
+        rpass.set_bind_group(0, &self.texture_state.bind_group, &[]);
+        rpass.set_bind_group(1, &self.camera_state.bind_group, &[]);
+        rpass.set_vertex_buffer(0, vertex_state.vertex_buffer.slice(..));
+        rpass.set_vertex_buffer(1, instance_state.instance_buffer.slice(..));
+        rpass.set_index_buffer(vertex_state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+    }
+    
+    fn draw_frame(
+        &mut self,
+        surface_texture: wgpu::SurfaceTexture,
+        vertex_state: &data::VertexState,
+        instance_state: &mut InstanceState,
+    ) -> Result<(), wgpu::SurfaceError> {
+        let view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        
+        // Use actual surface texture size for depth texture
+        let surface_size = surface_texture.texture.size();
+        let size = winit::dpi::PhysicalSize::new(surface_size.width, surface_size.height);
+        let aspect_ratio = size.width as f32 / size.height as f32;
+        
+        // Update all uniforms in one batch
+        self.update_uniforms(aspect_ratio, instance_state);
+        
+        let depth_tex = Texture::create_depth_tex(&self.device, size);
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        
+        {
+            let mut rpass = self.setup_render_pass(&mut encoder, &view, &depth_tex.view);
+            self.bind_resources(&mut rpass, vertex_state, instance_state);
+            rpass.draw_indexed(0..vertex_state.num_indices, 0, 0..instance_state.num_instances());
+        }
+        
+        self.queue.submit(Some(encoder.finish()));
+        surface_texture.present();
+        Ok(())
+    }
+}
+
 struct SurfaceState {
     window: winit::window::Window,
     surface: wgpu::Surface,
@@ -270,8 +357,6 @@ fn run(mut event_loop: EventLoop<()>) {
                 app.queue_redraw();
             }
             Event::RedrawRequested(_) => {
-                // log::info!("Handling Redraw Request");
-
                 if let (
                     Some(ref surface_state),
                     Some(ref mut rs),
@@ -296,75 +381,9 @@ fn run(mut event_loop: EventLoop<()>) {
                         }
                     };
                     
-                    let view = frame
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-
-                    // Use the actual surface texture size to ensure depth texture matches surface texture
-                    let surface_size = frame.texture.size();
-                    let size = winit::dpi::PhysicalSize::new(surface_size.width, surface_size.height);
-                    let aspect_ratio = size.width as f32 / size.height as f32;
-
-                    // Update instance rotations
-                    instance_state.update(&rs.queue);
-
-                    // Update camera uniform buffer
-                    rs.camera_state.camera.update_aspect_ratio(aspect_ratio);
-                    rs.camera_state.update();
-                    rs.queue.write_buffer(
-                        &rs.camera_state.buffer,
-                        0,
-                        bytemuck::cast_slice(&[rs.camera_state.uniform]),
-                    );
-                    let depth_tex = Texture::create_depth_tex(&rs.device, size);
-
-                    let mut encoder = rs
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-                    {
-                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: None,
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
-                                    store: true,
-                                },
-                            })],
-                            depth_stencil_attachment: Some(
-                                wgpu::RenderPassDepthStencilAttachment {
-                                    view: &depth_tex.view,
-                                    depth_ops: Some(wgpu::Operations {
-                                        load: wgpu::LoadOp::Clear(1.0),
-                                        store: true,
-                                    }),
-                                    stencil_ops: None,
-                                },
-                            ),
-                        });
-
-                        rpass.set_pipeline(&rs.render_pipeline);
-
-                        rpass.set_bind_group(0, &rs.texture_state.bind_group, &[]);
-                        rpass.set_bind_group(1, &rs.camera_state.bind_group, &[]);
-
-                        rpass.set_vertex_buffer(0, vertex_state.vertex_buffer.slice(..));
-                        rpass.set_vertex_buffer(1, instance_state.instance_buffer.slice(..));
-                        rpass.set_index_buffer(
-                            vertex_state.index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint16,
-                        );
-
-                        rpass.draw_indexed(
-                            0..vertex_state.num_indices,
-                            0,
-                            0..instance_state.num_instances(),
-                        );
+                    if let Err(e) = rs.draw_frame(frame, vertex_state, instance_state) {
+                        log::error!("Frame rendering failed: {}", e);
                     }
-
-                    rs.queue.submit(Some(encoder.finish()));
-                    frame.present();
                     surface_state.window.request_redraw();
                 }
             }
